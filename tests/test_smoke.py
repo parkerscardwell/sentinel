@@ -73,12 +73,17 @@ linear_client.enrich_many = lambda issues: None
 
 print("== daily run, observe mode ==")
 run_daily.run()
-check("observe register sent + thread dump", len(DMS) >= 2 and "observe" in DMS[0])
-check("observe register is itemized", "SWE-172" in DMS[0] and "HRD-21" in DMS[0])
-check("thread dump posted under main message", DMS[1].startswith("[thread:1234.5678]"))
-check("dump names every flagged issue", "SWE-172" in DMS[1] and "HRD-21" in DMS[1])
-check("clean issue not flagged", "SWE-900" not in DMS[0])
-check("titles render in register", "Scan strategy" not in DMS[0] or True)
+check("summary anchor sent first", "observe" in DMS[0] and "flagged across" in DMS[0])
+check("summary has team index", "*Software*" in DMS[0] and "*Hardware*" in DMS[0])
+team_msgs = [m for m in DMS if m.startswith("*SOFTWARE ·") or m.startswith("*HARDWARE ·")]
+check("one message per flagged team", len(team_msgs) == 2)
+check("team messages itemize their issues",
+      any("SWE-172" in m for m in team_msgs) and any("HRD-21" in m for m in team_msgs))
+threads = [m for m in DMS if m.startswith("[thread:")]
+check("each team gets its own thread dump", len(threads) == 2)
+check("thread dumps are team-scoped",
+      not any("SWE-172" in t and "HRD-21" in t for t in threads))
+check("clean issue not flagged", not any("SWE-900" in m for m in DMS))
 check("open flags persisted", set(STATE["open_flags"]) == {"SWE-172", "HRD-21"})
 check("flag metadata carries team/owner", STATE["open_flags"]["HRD-21"]["owner"] == "Marshall")
 check("first_seen recorded", set(STATE["flag_first_seen"]) == {"SWE-172", "HRD-21"})
@@ -95,9 +100,9 @@ STATE["last_daily_run"] = None            # let the forced second run proceed
 OPEN[1].last_state_change = datetime.now(timezone.utc)   # HRD-21 dead_wip resolves
 DMS.clear()
 run_daily.run()
-check("live register sent", DMS and DMS[0].startswith("*Linear ·"))
-check("resolved named in register", "HRD-21 (Hardware)" in DMS[0])
-check("worsened marker absent on steady items", "⬆️ <" not in DMS[0] or True)
+check("live summary sent", DMS and DMS[0].startswith("*Linear ·"))
+check("resolved named in summary", "HRD-21 (Hardware)" in DMS[0])
+check("resolved team posts no team message", not any(m.startswith("*HARDWARE ·") for m in DMS))
 check("HRD-21 dropped from open flags", "HRD-21" not in STATE["open_flags"])
 
 print("== daily failure path DMs a warning ==")

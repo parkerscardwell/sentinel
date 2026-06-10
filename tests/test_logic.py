@@ -165,7 +165,8 @@ check("last_state_change is the NEWEST event", iss.last_state_change.month == 6)
 check("entered_status_at = latest transition INTO current type", iss.entered_status_at.month == 6)
 
 print("== deterministic register: clustering, markers, completeness ==")
-from src.render import build_records, cluster_records, render_register, render_dump, chunk
+from src.render import (build_records, cluster_records, render_summary,
+                        render_team_message, render_dump, chunk, team_order)
 fnd = [Finding("SWE-172", "Software", None, "overdue", "critical", age_days=25),
        Finding("SWE-172", "Software", None, "stuck_triage", "critical", age_days=46),
        Finding("HRD-21", "Hardware", "Marshall Bruner", "dead_wip", "watch", age_days=12)]
@@ -188,18 +189,38 @@ cl, singles = cluster_records([r for r in recs if r["team"] == "Software"])
 check("identical-signature trio clusters", len(cl) == 1 and cl[0]["count"] == 3)
 check("cluster names every ID", cl[0]["ids"] == ["SWE-164", "SWE-165", "SWE-166"])
 check("non-matching issue stays itemized", any(r["id"] == "SWE-172" for r in singles))
-reg = render_register("Wed Jun 10", recs, {"Software": 50, "Hardware": 20},
+summ = render_summary("Wed Jun 10", recs, {"Software": 50, "Hardware": 20, "Brand": 4},
                       new={"HRD-21"}, worsened={"SWE-172"},
                       resolved_named=[{"id": "STR-1", "team": "Stratus"}],
                       aggregates=[], headline="Test headline.")
-check("register names all five issues",
-      all(i in reg for i in ("SWE-172", "SWE-164", "SWE-165", "SWE-166", "HRD-21")))
-check("cluster ages render as range", "in Triage 41–47d" in reg)
-check("new/worsened markers present", "🆕" in reg and "⬆️" in reg)
-check("resolved named in footer", "STR-1 (Stratus)" in reg)
-check("team status lines", "*SOFTWARE* — 4 flagged / 50 active" in reg)
-check("links use workspace slug", "rainmaker-technology-corp/issue/SWE-172" in reg)
-check("action hint on critical cluster", "bulk-assign owners" in reg)
+check("summary has per-team index", "*Software* — 4/50 · 4 Critical" in summ)
+check("summary names clean teams", "Clean: Brand" in summ)
+check("resolved named in summary", "STR-1 (Stratus)" in summ)
+sw = render_team_message("Software", [r for r in recs if r["team"] == "Software"], 50,
+                         new={"HRD-21"}, worsened={"SWE-172"}, date_label="Wed Jun 10")
+check("team message self-contained header",
+      sw.startswith("*SOFTWARE · Wed Jun 10* — 4 flagged / 50 active · 4 Critical"))
+check("team message names all its issues",
+      all(i in sw for i in ("SWE-172", "SWE-164", "SWE-165", "SWE-166")))
+check("cluster ages render as range", "in Triage 41–47d" in sw)
+check("worsened marker present", "⬆️" in sw)
+check("links use workspace slug", "rainmaker-technology-corp/issue/SWE-172" in sw)
+check("action hint on critical cluster", "bulk-assign owners" in sw)
+check("team ordering worst-first", team_order(recs) == ["Software", "Hardware"])
+# owner blocks: one owner with three watch items collapses under one header
+own = []
+for i, d in ((301, 12), (302, 19), (303, 25)):
+    own.append(Finding(f"RES-{i}", "Research", "Amie Abramyan", "dead_wip", "watch", age_days=d))
+own_ibi = {f"RES-{i}": Issue(id=f"RES-{i}", title=f"Res item {i}", team="Research",
+                             status_type="started", assignee="Amie Abramyan",
+                             project=f"P{i}") for i in (301, 302, 303)}
+own_recs = build_records(own, own_ibi)
+rm = render_team_message("Research", own_recs, 138, set(), set(), "Wed Jun 10")
+check("owner block header collapses repeats", "*Amie Abramyan — 3 items*" in rm)
+check("owner block lists every item", all(f"RES-{i}" in rm for i in (301, 302, 303)))
+check("owner not repeated per line", rm.count("Amie Abramyan") == 1)
+td = render_dump(recs + own_recs, set(), set(), only_team="Research")
+check("dump filters to one team", "RES-301" in td and "SWE-172" not in td)
 dump = render_dump(recs, {"HRD-21"}, set())
 check("dump itemizes cluster members individually", dump.count("Season item") == 3)
 pieces = chunk("\n".join(f"line {i} " + "x" * 80 for i in range(200)), limit=1000)

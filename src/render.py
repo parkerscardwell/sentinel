@@ -184,61 +184,127 @@ def _single_lines(r: dict, new: Set[str], worsened: Set[str]) -> List[str]:
     return lines
 
 
-def render_register(date_label: str, records: List[dict],
-                    active_by_team: Dict[str, int],
-                    new: Set[str], worsened: Set[str],
-                    resolved_named: List[dict], aggregates: List[Finding],
-                    headline: Optional[str] = None, observe: bool = False) -> str:
+HINT_PRIORITY = ("unowned_dated", "unowned_active", "overdue", "dead_wip",
+                 "stuck_triage", "abandoned")
+
+
+def _block_hint(rules_union: Set[str], owner: Optional[str], n: int) -> Optional[str]:
+    for rule in HINT_PRIORITY:
+        if rule in rules_union:
+            return action_hint({rule}, owner, plural=n > 1)
+    return None
+
+
+def _owner_blocks(singles: List[dict], new: Set[str], worsened: Set[str]) -> List[str]:
+    """Group an owner's items under one header with one action hint, so ten lines
+    ending 'nudge Amie' become one block. Owners with a single item render inline."""
+    by_owner: Dict[Optional[str], List[dict]] = defaultdict(list)
+    for r in singles:
+        by_owner[r["owner"]].append(r)
+    groups = sorted(by_owner.items(), key=lambda kv: (-len(kv[1]), kv[0] or "zzz"))
+    L: List[str] = []
+    for owner, rs in groups:
+        rs.sort(key=lambda r: -r["max_age"])
+        if len(rs) == 1:
+            L += _single_lines(rs[0], new, worsened)
+            continue
+        name = (owner or "Unowned").split("@")[0]
+        rules_union: Set[str] = set().union(*(r["rules"] for r in rs))
+        sev = max(r["severity"] for r in rs)
+        hint = _block_hint(rules_union, owner, len(rs)) if sev == 2 else None
+        L.append(f"{DOT[sev]} *{name} — {len(rs)} items*" + (f"  → {hint}" if hint else ""))
+        for r in rs:
+            conds = _conds_for(list(r["rule_age"].items()), r["owner"])
+            tail = f" · _{r['milestone']}_" if r["milestone"] else ""
+            L.append(f"      {_marker(r['id'], new, worsened)}{_link(r['id'])} "
+                     f"{_title(r['title'], 56)} — {', '.join(conds)}{tail}")
+    return L
+
+
+def render_team_message(team: str, records: List[dict], active: int,
+                        new: Set[str], worsened: Set[str], date_label: str,
+                        observe: bool = False) -> str:
+    """Self-contained per-team register — forwardable to that team's lead."""
+    nc = sum(1 for r in records if r["severity"] == 2)
+    n_new = sum(1 for r in records if r["id"] in new)
+    n_worse = sum(1 for r in records if r["id"] in worsened)
+    mode_tag = " (observe)" if observe else ""
+    move = "".join([f" · 🆕 {n_new}" if n_new else "", f" · ⬆️ {n_worse}" if n_worse else ""])
+    L = [f"*{team.upper()} · {date_label}*{mode_tag} — {len(records)} flagged / "
+         f"{active} active" + (f" · {nc} Critical" if nc else "") + move]
+    clusters, singles = cluster_records(records)
+    for sev in (2, 1, 0):
+        sev_clusters = sorted([c for c in clusters if c["severity"] == sev],
+                              key=lambda c: -c["count"])
+        sev_singles = [r for r in singles if r["severity"] == sev]
+        for c in sev_clusters:
+            L += _cluster_lines(c, new, worsened)
+        L += _owner_blocks(sev_singles, new, worsened)
+    L.append("_Full linked list in thread._")
+    return "\n".join(L)
+
+
+def render_summary(date_label: str, records: List[dict],
+                   active_by_team: Dict[str, int],
+                   new: Set[str], worsened: Set[str],
+                   resolved_named: List[dict], aggregates: List[Finding],
+                   headline: Optional[str] = None, observe: bool = False) -> str:
+    """The anchor message: totals, headline, per-team index, resolved, aggregates."""
     by_team: Dict[str, List[dict]] = defaultdict(list)
     for r in records:
         by_team[r["team"]].append(r)
     crit = sum(1 for r in records if r["severity"] == 2)
     watch = sum(1 for r in records if r["severity"] == 1)
-
     mode_tag = " (observe — would flag)" if observe else ""
     L = [f"*Linear · {date_label}*{mode_tag} — {len(records)} flagged across "
          f"{len(by_team)} teams · {crit} Critical · {watch} Watch · "
          f"🆕 {len(new)} new · ⬆️ {len(worsened)} worsened · {len(resolved_named)} resolved"]
     if headline:
         L += ["", f"_{headline}_"]
-
-    team_order = sorted(by_team.items(),
-                        key=lambda kv: (-sum(1 for r in kv[1] if r["severity"] == 2),
-                                        -len(kv[1])))
-    for team, rs in team_order:
+    L.append("")
+    for team, rs in sorted(by_team.items(),
+                           key=lambda kv: (-sum(1 for r in kv[1] if r["severity"] == 2),
+                                           -len(kv[1]))):
         nc = sum(1 for r in rs if r["severity"] == 2)
-        L += ["", f"*{team.upper()}* — {len(rs)} flagged / {active_by_team.get(team, 0)} active"
-              + (f" · {nc} Critical" if nc else "")]
-        clusters, singles = cluster_records(rs)
-        for sev in (2, 1, 0):
-            for c in sorted([c for c in clusters if c["severity"] == sev],
-                            key=lambda c: -c["count"]):
-                L += _cluster_lines(c, new, worsened)
-            for r in sorted([r for r in singles if r["severity"] == sev],
-                            key=lambda r: -r["max_age"]):
-                L += _single_lines(r, new, worsened)
-
+        n_new = sum(1 for r in rs if r["id"] in new)
+        L.append(f"• *{team}* — {len(rs)}/{active_by_team.get(team, 0)}"
+                 + (f" · {nc} Critical" if nc else "")
+                 + (f" · 🆕 {n_new}" if n_new else ""))
+    clean = sorted(t for t, n in active_by_team.items() if n and not by_team.get(t))
+    if clean:
+        L.append(f"✨ Clean: {', '.join(clean)}")
     if aggregates:
-        L += ["", "*Workspace-wide (flood-guarded; detail in Monday rollup)*"]
+        L.append("")
         for a in aggregates:
-            L.append(f"• {a.team}: {a.rule.replace('__aggregate', '').replace('_', ' ')} — {a.detail}")
-
+            L.append(f"⚠️ {a.team}: {a.rule.replace('__aggregate', '').replace('_', ' ')} — {a.detail}")
     L.append("")
     if resolved_named:
         names = " · ".join(f"{r['id']} ({r['team']})" for r in resolved_named)
         L.append(f"✅ *Resolved since last run:* {names}")
     else:
         L.append("✅ Resolved since last run: none")
-    L.append("_Full per-issue list in thread._")
+    L.append("_Team registers follow, one message each — forward to the relevant lead._")
     return "\n".join(L)
 
 
-def render_dump(records: List[dict], new: Set[str], worsened: Set[str]) -> str:
-    """Exhaustive one-line-per-issue list, grouped by team — for the thread."""
+def team_order(records: List[dict]) -> List[str]:
     by_team: Dict[str, List[dict]] = defaultdict(list)
     for r in records:
         by_team[r["team"]].append(r)
-    L = ["*Full register — every flagged issue:*"]
+    return [t for t, _ in sorted(by_team.items(),
+            key=lambda kv: (-sum(1 for r in kv[1] if r["severity"] == 2), -len(kv[1])))]
+
+
+def render_dump(records: List[dict], new: Set[str], worsened: Set[str],
+                only_team: Optional[str] = None) -> str:
+    """Exhaustive one-line-per-issue list — threads under each team message."""
+    if only_team is not None:
+        records = [r for r in records if r["team"] == only_team]
+    by_team: Dict[str, List[dict]] = defaultdict(list)
+    for r in records:
+        by_team[r["team"]].append(r)
+    L = [f"*Full register — every flagged {only_team} issue:*" if only_team
+         else "*Full register — every flagged issue:*"]
     for team in sorted(by_team, key=lambda t: (-sum(1 for r in by_team[t] if r["severity"] == 2),
                                                -len(by_team[t]))):
         L.append(f"\n*{team.upper()}*")

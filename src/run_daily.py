@@ -189,9 +189,11 @@ def run() -> None:
         "mode": state.get("mode", "observe"),
     })
 
-    # ---- deliver: deterministic register (observe and live differ only in tag),
-    # with the exhaustive per-issue dump threaded underneath ----
-    from .render import build_records, render_register, render_dump, chunk, cluster_records
+    # ---- deliver: summary anchor, then one self-contained message per team
+    # (forwardable to that team's lead) with the team's linked dump threaded
+    # underneath. Observe and live differ only in the tag. ----
+    from .render import (build_records, render_summary, render_team_message,
+                         render_dump, chunk, cluster_records, team_order)
     from .slack_client import dm_parker, dm_parker_thread
     records = build_records(kept, issue_by_id)
     new_set, worse_set = set(rec["new"]), set(rec["worsened"])
@@ -210,18 +212,26 @@ def run() -> None:
                 for c in sorted(clusters, key=lambda c: -c["count"])[:5]],
         })
 
-    main = render_register(today_label, records, active_by_team, new_set, worse_set,
-                           resolved_named, aggregates, headline=head or None,
-                           observe=state.get("mode") == "observe")
-    # Heavy days can exceed Slack's per-message cap: the register posts as
-    # sequential top-level messages; the exhaustive dump threads under the first.
-    main_pieces = chunk(main)
-    ts = dm_parker(main_pieces[0])
-    for piece in main_pieces[1:]:
+    observe_mode = state.get("mode") == "observe"
+    summary = render_summary(today_label, records, active_by_team, new_set, worse_set,
+                             resolved_named, aggregates, headline=head or None,
+                             observe=observe_mode)
+    for piece in chunk(summary):
         dm_parker(piece)
-    if records and ts:
-        for piece in chunk(render_dump(records, new_set, worse_set)):
-            dm_parker_thread(piece, ts)
+    recs_by_team = defaultdict(list)
+    for r in records:
+        recs_by_team[r["team"]].append(r)
+    for team in team_order(records):
+        msg = render_team_message(team, recs_by_team[team],
+                                  active_by_team.get(team, 0),
+                                  new_set, worse_set, today_label, observe_mode)
+        pieces = chunk(msg)
+        ts = dm_parker(pieces[0])
+        for piece in pieces[1:]:
+            dm_parker(piece)
+        if ts:
+            for piece in chunk(render_dump(records, new_set, worse_set, only_team=team)):
+                dm_parker_thread(piece, ts)
 
     # ---- save state ----
     state["open_flags"] = cur_open
