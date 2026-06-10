@@ -32,22 +32,20 @@ Rainmaker monorepo and infrastructure.
   09:00–11:59 PT and dedupe on "already ran today (PT)". Both DST cron lines may
   fire; the first valid one wins. `RUN_FORCE=1` bypasses for manual runs.
 
-## Daily DM — the team register
-The daily is a complete, deterministic register: **every flagged issue, by name,
-grouped by team** (worst first), with a team status line (X flagged / Y active ·
-N Critical), per-issue titles, owners, plain-English conditions with ages,
-milestone tags, Linear links, and action hints on Criticals. Movement is
-annotation, not filter: 🆕 new / ⬆️ worsened markers, and resolved issues listed
-by name. Identical-signature groups (same team, owner, rules, severity, and
-project/milestone; 3+ issues) collapse into one cluster block that still names
-every ID — 33 lines of the same problem become 3 with nothing hidden. The
-exhaustive linked one-line-per-issue dump posts as a threaded reply under the
-register. The register is rendered in code, never by a model, so completeness is
-guaranteed; Haiku contributes only the one-sentence headline at the top, and the
-register goes out with or without it. Heavy days split across sequential
-messages automatically (Slack message cap). Flood-guard aggregates appear as a
-workspace-wide section; their detail lives in the Monday rollup. Observe mode
-sends the identical register tagged "(observe — would flag)".
+## Daily DM — summary + one register per team
+The daily arrives as a **summary anchor** (totals, headline, a per-team index,
+clean teams, flood-guard aggregates, resolved-by-name) followed by **one
+self-contained message per flagged team**, worst first — each forwardable to
+that team's lead as-is. Within a team message: identical-signature clusters
+(3+ issues sharing team/owner/rules/severity and project/milestone) collapse to
+one block naming every ID; remaining items group under **owner blocks** with one
+action hint per owner instead of per line, reading as a per-person worklist.
+Every flagged issue appears by name every day; movement is annotation (🆕 / ⬆️
+markers), never a filter. Each team's exhaustive linked one-line-per-issue dump
+threads under that team's message. All of it is rendered deterministically in
+code so completeness is guaranteed; Haiku contributes only the headline sentence,
+and the day goes out with or without it. Oversized messages split automatically.
+Observe mode sends the identical structure tagged "(observe)".
 
 ## Weekly rollup (Mondays)
 Computed entirely in code (`src/weekly_metrics.py`), phrased by Opus:
