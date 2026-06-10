@@ -1,0 +1,24 @@
+name: sentinel-weekly
+on:
+  schedule:
+    - cron: "0 16 * * 1"     # Monday 09:00 PDT
+    - cron: "0 17 * * 1"     # Monday 09:00 PST
+  workflow_dispatch: {}
+jobs:
+  rollup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m src.run_weekly
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          PARKER_SLACK_ID: ${{ secrets.PARKER_SLACK_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Manual button runs skip the 9-11am PT guard; cron runs respect it.
+          RUN_FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}

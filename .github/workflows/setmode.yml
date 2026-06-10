@@ -1,0 +1,23 @@
+# Flip observe <-> live from the browser: Actions tab -> sentinel-set-mode ->
+# Run workflow -> choose mode. No local Python or SQL required.
+name: sentinel-set-mode
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Sentinel mode"
+        required: true
+        type: choice
+        options: [observe, live]
+jobs:
+  setmode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m src.set_mode ${{ inputs.mode }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

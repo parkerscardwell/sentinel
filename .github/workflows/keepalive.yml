@@ -1,0 +1,20 @@
+# GitHub disables scheduled workflows after 60 days of repository inactivity.
+# This repo is push-once-and-forget, so a monthly empty commit keeps the crons
+# alive indefinitely. Without this, the sentinel silently dies ~2 months in.
+name: sentinel-keepalive
+on:
+  schedule:
+    - cron: "0 12 1 * *"   # 1st of each month, 12:00 UTC
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git config user.name "sentinel-keepalive"
+          git config user.email "keepalive@users.noreply.github.com"
+          git commit --allow-empty -m "keepalive: $(date -u +%F)"
+          git push
